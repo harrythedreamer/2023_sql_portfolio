@@ -1,7 +1,313 @@
-CUSTOMER CLUSTERING: A PART OF CUSTOMER 360 ANALYSIS
+CUSTOMER CLUSTERING WITH RFM MODEL (RECENCY - FREQUENCY - MONETARY): A PART OF CUSTOMER 360 ANALYSIS
 
 The customer dataset comprises three interrelated tables, delineated as follows:
 1. customer_transaction: records of transactions
-- Transaction_ID
+- Transaction_ID: key of transaction
+- CustomerID: key of customer
+- Purchase_Date: date of transaction
+- GMV: value of the transaction
+2. customer_registered: lookup table containing customer information
+- ID: key of customer
+- Contract: type of contract
+- LocationID: key of the location
+- BranchCode
+- Status
+- created_date: date of registration
+- stopdate: when customer stops active
+3. location: lookup table containing location information
+- ID: key of location
+... and other columns of information (not necessary in this analysis)
 
-fgndgndg
+A. Descriptive Information
+
+----- Number of registered customers
+select count(*) as num_registered_cus from customer_registered
+
+
+----- Number of customers who made transactions
+select count(distinct CustomerID) as num_active_cus from customer_transaction
+
+
+----- Number of transactions
+select count(*) as num_trans from customer_transaction
+
+
+----- Number of customers making transactions by locations
+select loc.LocationName, count(ct.CustomerID) as num_cus
+from customer_transaction as ct
+left join customer_registered as cr
+on ct.CustomerID = cr.ID
+left join location as loc
+on cr.LocationID = loc.ID
+group by LocationName
+
+
+B. Customer Analysis and Alustering
+
+----- Customer Recency: display a table containing each CustomerID and relative recency
+with source_table as
+(
+select CustomerID, Transaction_ID, GMV
+	, case when length(Purchase_Date) = 10 then Purchase_Date
+	when length(Purchase_Date) = 9 then concat('0',Purchase_Date)
+	when length(Purchase_Date) = 8 then
+	concat ('0', substring(Purchase_Date, 1, 1), '/0', substring(Purchase_Date, 3, 1), '/', substring(Purchase_Date, 5, 4))
+	end as Purchase_Date
+from customer_transaction
+)
+, altered_source_table as
+(
+	select CustomerID, Transaction_ID, GMV, str_to_date(Purchase_Date, '%m/%d/%Y') as Purchase_Date
+	from source_table
+)
+select CustomerID , datediff('2022-12-31', max(Purchase_Date)) as recency
+from altered_source_table
+group by CustomerID
+
+
+----- Customer Frequency: display a table containing each CustomerID and relative frequency
+with source_table as
+(
+select CustomerID, Transaction_ID, GMV
+	, case when length(Purchase_Date) = 10 then Purchase_Date
+	when length(Purchase_Date) = 9 then concat('0',Purchase_Date)
+	when length(Purchase_Date) = 8 then
+	concat ('0', substring(Purchase_Date, 1, 1), '/0', substring(Purchase_Date, 3, 1), '/', substring(Purchase_Date, 5, 4))
+	end as Purchase_Date
+from customer_transaction
+)
+, altered_source_table as
+(
+	select CustomerID, Transaction_ID, GMV, str_to_date(Purchase_Date, '%m/%d/%Y') as Purchase_Date
+	from source_table
+)
+select CustomerID, count(distinct Transaction_ID) as frequency
+from altered_source_table
+group by CustomerID
+
+
+----- Customer monetary: display a table containing each CustomerID and relative monetary
+with source_table as
+(
+select CustomerID, Transaction_ID, GMV
+	, case when length(Purchase_Date) = 10 then Purchase_Date
+	when length(Purchase_Date) = 9 then concat('0',Purchase_Date)
+	when length(Purchase_Date) = 8 then
+	concat ('0', substring(Purchase_Date, 1, 1), '/0', substring(Purchase_Date, 3, 1), '/', substring(Purchase_Date, 5, 4))
+	end as Purchase_Date
+from customer_transaction
+)
+, altered_source_table as
+(
+	select CustomerID, Transaction_ID, GMV, str_to_date(Purchase_Date, '%m/%d/%Y') as Purchase_Date
+	from source_table
+)
+select CustomerID, sum(GMV) as monetary
+from altered_source_table
+group by CustomerID
+
+
+----- FRM Score: display FRM score of each customer
+with source_table as
+(
+select CustomerID, Transaction_ID, GMV
+	, case when length(Purchase_Date) = 10 then Purchase_Date
+	when length(Purchase_Date) = 9 then concat('0',Purchase_Date)
+	when length(Purchase_Date) = 8 then
+	concat ('0', substring(Purchase_Date, 1, 1), '/0', substring(Purchase_Date, 3, 1), '/', substring(Purchase_Date, 5, 4))
+	end as Purchase_Date
+from customer_transaction
+)
+, altered_source_table as
+(
+	select CustomerID, Transaction_ID, GMV, str_to_date(Purchase_Date, '%m/%d/%Y') as Purchase_Date
+	from source_table
+)
+, rfm_table as
+(
+	select CustomerID
+		, datediff('2022-12-31', max(Purchase_Date)) as recency
+		, count(distinct Transaction_ID) as frequency
+		, sum(GMV) as monetary
+	from altered_source_table
+	group by CustomerID
+)
+, rfm_percent_rank as
+(
+	select CustomerID
+		, percent_rank() over (order by recency) as r_percent_rank
+		, percent_rank() over (order by frequency) as f_percent_rank
+		, percent_rank() over (order by monetary) as m_percent_rank
+	from rfm_table
+)
+, rfm_tier as
+(
+	select CustomerID
+		, case when r_percent_rank <= 0.25 then 1
+		when r_percent_rank <= 0.5 then 2
+		when r_percent_rank <= 0.75 then 3
+		else 4 end as r_tier
+		, case when f_percent_rank <= 0.25 then 4
+		when f_percent_rank <= 0.5 then 3
+		when f_percent_rank <= 0.75 then 2
+		else 1 end as f_tier
+		, case when m_percent_rank <= 0.25 then 4
+		when m_percent_rank <= 0.5 then 3
+		when m_percent_rank <= 0.75 then 2
+		else 1 end as m_tier
+	from rfm_percent_rank
+)
+, rfm_score as
+(
+	select CustomerID, concat(r_tier, f_tier, m_tier) as rfm_score
+	from rfm_tier
+)
+select rfm_score, count(CustomerID) as num_of_cus
+from rfm_score
+group by rfm_score
+
+
+----- Customer clustering with BCG matrix
+with source_table as
+(
+select CustomerID, Transaction_ID, GMV
+	, case when length(Purchase_Date) = 10 then Purchase_Date
+	when length(Purchase_Date) = 9 then concat('0',Purchase_Date)
+	when length(Purchase_Date) = 8 then
+	concat ('0', substring(Purchase_Date, 1, 1), '/0', substring(Purchase_Date, 3, 1), '/', substring(Purchase_Date, 5, 4))
+	end as Purchase_Date
+from customer_transaction
+)
+, altered_source_table as
+(
+	select CustomerID, Transaction_ID, GMV, str_to_date(Purchase_Date, '%m/%d/%Y') as Purchase_Date
+	from source_table
+)
+, rfm_table as
+(
+	select CustomerID
+		, datediff('2022-12-31', max(Purchase_Date)) as recency
+		, count(distinct Transaction_ID) as frequency
+		, sum(GMV) as monetary
+	from altered_source_table
+	group by CustomerID
+)
+, rfm_percent_rank as
+(
+	select CustomerID
+		, percent_rank() over (order by recency) as r_percent_rank
+		, percent_rank() over (order by frequency) as f_percent_rank
+		, percent_rank() over (order by monetary) as m_percent_rank
+	from rfm_table
+)
+, rfm_tier as
+(
+	select CustomerID
+		, case when r_percent_rank <= 0.25 then 1
+		when r_percent_rank <= 0.5 then 2
+		when r_percent_rank <= 0.75 then 3
+		else 4 end as r_tier
+		, case when f_percent_rank <= 0.25 then 4
+		when f_percent_rank <= 0.5 then 3
+		when f_percent_rank <= 0.75 then 2
+		else 1 end as f_tier
+		, case when m_percent_rank <= 0.25 then 4
+		when m_percent_rank <= 0.5 then 3
+		when m_percent_rank <= 0.75 then 2
+		else 1 end as m_tier
+	from rfm_percent_rank
+)
+, rfm_score as
+(
+	select CustomerID, concat(r_tier, f_tier, m_tier) as rfm_score
+	from rfm_tier
+)
+, clustering as
+(
+	select CustomerID, case
+		when rfm_score regexp '[12][12][12]' then 'VIP'
+		when rfm_score regexp '[12][34][12]' then 'Potential'
+		when rfm_score regexp '[2-4][12][34]' then 'Mass'
+		when rfm_score regexp '[34][34][34]' then 'Secondary'
+	end as cus_clustering
+	from rfm_score
+)
+select cus_clustering, count(CustomerID) as num_cus
+from clustering
+group by cus_clustering
+order by count(CustomerID)
+
+
+----- Customer lustering with the segmentation framework
+with source_table as
+(
+select CustomerID, Transaction_ID, GMV
+	, case when length(Purchase_Date) = 10 then Purchase_Date
+	when length(Purchase_Date) = 9 then concat('0',Purchase_Date)
+	when length(Purchase_Date) = 8 then
+	concat ('0', substring(Purchase_Date, 1, 1), '/0', substring(Purchase_Date, 3, 1), '/', substring(Purchase_Date, 5, 4))
+	end as Purchase_Date
+from customer_transaction
+)
+, altered_source_table as
+(
+	select CustomerID, Transaction_ID, GMV, str_to_date(Purchase_Date, '%m/%d/%Y') as Purchase_Date
+	from source_table
+)
+, rfm_table as
+(
+	select CustomerID
+		, datediff('2022-12-31', max(Purchase_Date)) as recency
+		, count(distinct Transaction_ID) as frequency
+		, sum(GMV) as monetary
+	from altered_source_table
+	group by CustomerID
+)
+, rfm_percent_rank as
+(
+	select CustomerID
+		, percent_rank() over (order by recency) as r_percent_rank
+		, percent_rank() over (order by frequency) as f_percent_rank
+		, percent_rank() over (order by monetary) as m_percent_rank
+	from rfm_table
+)
+, rfm_tier as
+(
+	select CustomerID
+		, case when r_percent_rank <= 0.25 then 1
+		when r_percent_rank <= 0.5 then 2
+		when r_percent_rank <= 0.75 then 3
+		else 4 end as r_tier
+		, case when f_percent_rank <= 0.25 then 4
+		when f_percent_rank <= 0.5 then 3
+		when f_percent_rank <= 0.75 then 2
+		else 1 end as f_tier
+		, case when m_percent_rank <= 0.25 then 4
+		when m_percent_rank <= 0.5 then 3
+		when m_percent_rank <= 0.75 then 2
+		else 1 end as m_tier
+	from rfm_percent_rank
+)
+, rfm_score as
+(
+	select CustomerID, concat(r_tier, f_tier, m_tier) as rfm_score
+	from rfm_tier
+)
+, segment as
+(
+	select CustomerID, case
+		when rfm_score = '111' then 'Best customer'
+		when rfm_score regexp '11[2-4]' then 'Loyal customer'
+		when rfm_score regexp '[12][23]1' then 'Big spender'
+		when rfm_score regexp '[12][23][2-4]' then 'Potential loyalist'
+		when rfm_score regexp '[12]4[1-4]' then 'New customer'
+		when rfm_score regexp '[34][12][1-4]' then 'Hibernating'
+		when rfm_score regexp '21[1-4]' then 'At risk'
+		when rfm_score regexp '[34][34][1-4]' then 'Lost customer'
+		end as segment
+	from rfm_score
+)
+select segment, count(CustomerID) as num_cus
+from segment
+group by segment
+order by count(CustomerID)
