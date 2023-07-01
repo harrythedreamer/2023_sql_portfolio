@@ -1,2 +1,97 @@
 EVALUATE CUSTOMER LOYALTY POST PROMOTION (DISCOUNT) - AN AD-HOC ANALYSIS TASK
 
+- The Dragon Wallet operates as a digital wallet allowing customers to make transaction within multiple purposes.
+- The dataset contains 5 tables:
+1. fact_transaction_2019: records of transactions made in 2019
+2. fact_transaction_2020: records of transactions made in 2020
+3. dim_payment_channel: dimensional table details payment channels
+4. dim_platform: dimensional table details device platforms
+5. dim_scenario: dimensional table details purposes of transaction
+6. dim_status: dimensional table details status of transaction
+
+Situation: In 2020, the marketing department offered several promotion program (discount on transaction fee). 
+My task is to determine whether customers made further transactions after the first promotional transaction.
+
+----- Question 1: To find the trend of weekly promotion successful transaction, and its propotion over total successful transaction
+with week_table as 
+    (
+        select datepart(week, transaction_time) as week
+            , transaction_id
+            , cast(promotion_id as varchar) as promotion_id
+        from fact_transaction_2020
+        where status_id = 1
+    )
+select week 
+    , sum(iif(promotion_id <> '0', 1, 0)) as promo_trans 
+    , count(*) as total_trans
+from week_table
+group by week 
+order by week
+
+
+----- Question 2: To display the list of customers who made further non-promotional transactions (non_promo) after a promotional_transaction (promo)
+with customer_table as
+   (
+       select customer_id
+           , transaction_id
+           , promotion_id
+       from fact_transaction_2020
+       where status_id = 1
+   )
+, previous_table as
+   (
+       select *
+           , lag(promotion_id, 1) over (partition by customer_id order by transaction_id) as previous_promo_id
+       from customer_table
+   )
+select distinct customer_id
+from previous_table
+where previous_promo_id <> '0' and promotion_id = '0'
+order by customer_id
+
+
+----- Question 3: To categorize these customer based on number of further non-promotional transactions
+with customer_table as
+    (
+        select customer_id
+            , transaction_id
+            , promotion_id 
+        from fact_transaction_2020
+        where status_id = 1
+    )
+, previous_table as
+    (
+        select *
+            , lag(promotion_id, 1) over (partition by customer_id order by transaction_id) as previous_promo_id
+        from customer_table
+    )
+, repeat_cus_table as 
+    (
+        select *
+        from previous_table
+        where previous_promo_id <> '0' and promotion_id = '0'
+    )
+, repeat_quantity_table as 
+(
+select customer_id
+    , count(customer_id) as repeat_quantity
+from repeat_cus_table
+group by customer_id
+)
+, lotalty_table as 
+    (
+        select customer_id
+            , case
+            when repeat_quantity <= 5 then 'Low'
+            when repeat_quantity between 6 and 10 then 'Medium low'
+            when repeat_quantity between 11 and 15 then 'Medium'
+            when repeat_quantity between 16 and 20 then 'Medium high'
+            else 'High'
+            end as loyalty_level
+        from repeat_quantity_table 
+    )
+select loyalty_level
+    , count(*) as customer_quantity
+from lotalty_table
+group by loyalty_level
+order by count(*); 
