@@ -4,7 +4,7 @@ EVALUATE CUSTOMER LOYALTY POST PROMOTION (DISCOUNT) - AN AD-HOC ANALYSIS TASK
 - The dataset contains 5 tables:
 1. fact_transaction_2019: records of transactions made in 2019
 2. fact_transaction_2020: records of transactions made in 2020
-3. dim_payment_channel: dimensional table details payment channels
+3. dim_payment_channel: dimensional table details payment channels 
 4. dim_platform: dimensional table details device platforms
 5. dim_scenario: dimensional table details purposes of transaction
 6. dim_status: dimensional table details status of transaction
