@@ -1,0 +1,222 @@
+TIME SERIES ANALYSIS - FINDING TRENDS OF SUCCESSFUL TRANSACTION QUANTITY IN THE 2019-2020 PERIOD
+
+The dataset contains 5 tables:
+1. fact_transaction_2019: records of transactions made in 2019
+2. fact_transaction_2020: records of transactions made in 2020
+3. dim_payment_channel: dimensional table details payment channels
+4. dim_platform: dimensional table details device platforms
+5. dim_scenario: dimensional table details purposes of transaction
+6. dim_status: dimensional table details status of transaction
+
+----- Overall trends: display monthly transaction quantity over period
+with fact_total as
+   (
+       select * from fact_transaction_2019
+       union
+       select * from fact_transaction_2020
+       where status_id = 1
+   )
+, month_year as
+   (
+       select right(year(transaction_time), 2) as year
+           , month(transaction_time) as month
+           , count(transaction_id) as monthly_trans_quantity
+       from fact_total
+       group by year(transaction_time), month(transaction_time), month(transaction_time)
+   )
+select iif(month <10, concat(year, '.0', month), concat(year, '.', month)) as month_year
+   , monthly_trans_quantity
+from month_year
+order by month_year
+
+
+----- By payment_method: examine the trend by payment method
+with fact_total as
+    (
+        select * from fact_transaction_2019
+        union
+        select * from fact_transaction_2020
+        where status_id = 1
+    )
+, month_year as 
+    (
+        select payment_method
+            , right(year(transaction_time), 2) as year
+            , month(transaction_time) as month
+            , count(transaction_id) as monthly_trans_quantity
+        from fact_total as fact 
+        left join dim_payment_channel as method
+        on fact.payment_channel_id = method.payment_channel_id
+        group by payment_method, right(year(transaction_time), 2), month(transaction_time)
+    )
+select payment_method
+    , iif(month <10, concat(year, '.0', month), concat(year, '.', month)) as month_year
+    , monthly_trans_quantity
+from month_year 
+group by payment_method, iif(month <10, concat(year, '.0', month), concat(year, '.', month)), monthly_trans_quantity
+order by payment_method, month_year
+
+
+----- By platform: examine the trend by device platform
+with fact_total as
+    (
+        select * from fact_transaction_2019
+        union
+        select * from fact_transaction_2020
+        where status_id = 1
+    )
+, month_year as 
+    (
+        select payment_platform
+            , right(year(transaction_time), 2) as year
+            , month(transaction_time) as month
+            , count(transaction_id) as monthly_trans_quantity
+        from fact_total as fact 
+        left join dim_platform as plat 
+        on fact.platform_id = plat.platform_id
+        group by payment_platform, right(year(transaction_time), 2), month(transaction_time)
+    )
+select payment_platform
+    , iif(month <10, concat(year, '.0', month), concat(year, '.', month)) as month_year
+    , monthly_trans_quantity
+from month_year 
+group by payment_platform, iif(month <10, concat(year, '.0', month), concat(year, '.', month)), monthly_trans_quantity
+order by payment_platform, month_year
+
+
+----- By sub_category: examine the trend by sub category (subset of payment purpose)
+with fact_total as
+    (
+        select * from fact_transaction_2019
+        union
+        select * from fact_transaction_2020
+        where status_id = 1
+    )
+, month_year as 
+    (
+        select sub_category
+            , right(year(transaction_time), 2) as year
+            , month(transaction_time) as month
+            , count(transaction_id) as monthly_trans_quantity
+        from fact_total as fact 
+        left join dim_scenario as sce 
+        on fact.scenario_id = sce.scenario_id
+        group by sub_category, right(year(transaction_time), 2), month(transaction_time)
+    )
+select iif(sub_category is null, 'Unknown', sub_category) as sub_category -- there are null value
+    , iif(month <10, concat(year, '.0', month), concat(year, '.', month)) as month_year
+    , monthly_trans_quantity
+from month_year 
+group by sub_category, iif(month <10, concat(year, '.0', month), concat(year, '.', month)), monthly_trans_quantity
+order by sub_category, month_year
+
+
+----- By promotion and not: examine the trend with filtering whether the transaction is promotional or not
+with fact_total as
+    (
+        select * from fact_transaction_2019
+        union
+        select * from fact_transaction_2020
+        where status_id = 1
+    )
+, month_year as 
+    (
+        select cast(promotion_id as varchar) as promotion_id
+            , right(year(transaction_time), 2) as year
+            , month(transaction_time) as month
+            , count(transaction_id) as monthly_trans_quantity
+        from fact_total 
+        group by promotion_id, right(year(transaction_time), 2), month(transaction_time)
+    )
+select iif(promotion_id = '0', 'Non-promo', 'Promo') as promo_or_not
+    , iif(month <10, concat(year, '.0', month), concat(year, '.', month)) as month_year
+    , sum(monthly_trans_quantity) as monthly_trans_quantity
+from month_year 
+group by iif(month <10, concat(year, '.0', month), concat(year, '.', month)), iif(promotion_id = '0', 'Non-promo', 'Promo')
+order by promo_or_not, month_year;
+
+
+----- By daily session: examine the trend by daily session (time dimension)
+with fact_total as
+    (
+        select * from fact_transaction_2019
+        union
+        select * from fact_transaction_2020
+        where status_id = 1
+    )
+, month_year as 
+    (
+        select case 
+                when datepart(hour, transaction_time) between 0 and 5 then 'Night'
+                when datepart(hour, transaction_time) between 6 and 12 then 'Morning' 
+                when datepart(hour, transaction_time) between 13 and 18 then 'Afternoon'
+            else 'Evening' 
+            end as time_session
+            , right(year(transaction_time), 2) as year
+            , month(transaction_time) as month
+            , transaction_id
+        from fact_total
+    )
+select time_session
+    , iif(month <10, concat(year, '.0', month), concat(year, '.', month)) as month_year
+    , count(transaction_id) as monthly_trans_quantity
+from month_year 
+group by time_session, iif(month <10, concat(year, '.0', month), concat(year, '.', month))
+order by time_session, iif(month <10, concat(year, '.0', month), concat(year, '.', month));
+
+
+----- Running total 2019: compare the 2019 performace to assumed weekly kpi being 5.000 units
+with kpi_table as
+   (
+       select datepart(week, transaction_time) as week_number
+           , count(transaction_id) as monthly_trans_quantity
+           , 5000 as weekly_kpi
+       from fact_transaction_2019
+       where status_id = 1
+       group by datepart(week, transaction_time)
+   )
+select week_number
+    , sum(monthly_trans_quantity) over (order by week_number) as running_total
+    , sum(weekly_kpi) over (order by week_number) as running_kpi
+from kpi_table
+order by week_number;
+
+
+----- Running total 2020: compare the 2020 performace to assumed weekly kpi being 10.000 units
+with kpi_table as
+   (
+       select datepart(week, transaction_time) as week_number
+           , count(transaction_id) as monthly_trans_quantity
+           , 10000 as weekly_kpi
+       from fact_transaction_2020
+       where status_id = 1
+       group by datepart(week, transaction_time)
+   )
+select week_number
+    , sum(monthly_trans_quantity) over (order by week_number) as running_total
+    , sum(weekly_kpi) over (order by week_number) as running_kpi
+from kpi_table
+order by week_number;
+
+
+----- Month-over-Month comparison between 2019 and 2020
+with fact_total as 
+    (
+       select * from fact_transaction_2019
+        union
+        select * from fact_transaction_2020
+        where status_id = 1 
+    )
+, year_month as 
+    (
+        select year(transaction_time) as year
+        , month(transaction_time) as month
+            , count(transaction_id) as monthly_trans_quantity
+        from fact_total
+        group by year(transaction_time), month(transaction_time)
+    )
+select distinct month 
+    , sum(iif(year = 2019, monthly_trans_quantity, 0)) over (partition by month) as [2019_trans]
+    , sum(iif(year = 2020, monthly_trans_quantity, 0)) over (partition by month) as [2020_trans]
+from year_month
+order by month;
